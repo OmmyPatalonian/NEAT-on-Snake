@@ -25,7 +25,7 @@
 // Global variables
 var Neuvol;
 var game;
-var FPS = 60;
+var FPS = 30;  // Starting with slower speed to make it more visible
 var maxScore = 0;
 
 // Set the FPS for the game
@@ -133,8 +133,8 @@ Snake.prototype.update = function(grid) {
     }
     
     // Check collision with walls
-    if (newHead.x < 0 || newHead.x >= grid.width || 
-        newHead.y < 0 || newHead.y >= grid.height) {
+    if (newHead.x < 0 || newHead.x >= grid.gridWidth || 
+        newHead.y < 0 || newHead.y >= grid.gridHeight) {
         this.alive = false;
         return;
     }
@@ -142,6 +142,14 @@ Snake.prototype.update = function(grid) {
     // Check collision with self (except tail which will move)
     for (var i = 0; i < this.body.length - 1; i++) {
         if (newHead.x === this.body[i].x && newHead.y === this.body[i].y) {
+            this.alive = false;
+            return;
+        }
+    }
+    
+    // Check collision with obstacles
+    for (var i = 0; i < grid.obstacles.length; i++) {
+        if (newHead.x === grid.obstacles[i].x && newHead.y === grid.obstacles[i].y) {
             this.alive = false;
             return;
         }
@@ -169,9 +177,9 @@ Snake.prototype.update = function(grid) {
 // Game class
 function Game() {
     // Grid dimensions
-    this.gridWidth = 20;
-    this.gridHeight = 20;
-    this.tileSize = 20;
+    this.gridWidth = 40;
+    this.gridHeight = 30;
+    this.tileSize = 15;
     
     // Canvas setup
     this.canvas = document.getElementById('snakeCanvas');
@@ -185,12 +193,16 @@ function Game() {
     
     // Game state
     this.food = {x: 15, y: 15};
+    this.obstacles = [];  // Array to store obstacle positions
     this.snakes = [];
     this.score = 0;
     this.maxScore = 0;
     this.generation = 0;
     this.alives = 0;
     this.gen = [];
+    
+    // Create some obstacles
+    this.createObstacles();
 }
 
 // Generate food at a random empty position
@@ -203,9 +215,15 @@ Game.prototype.generateFood = function() {
         this.food.x = Math.floor(Math.random() * this.gridWidth);
         this.food.y = Math.floor(Math.random() * this.gridHeight);
         
-        // Check if this position is occupied by any snake
+        // Check if this position is occupied by any snake or obstacle
         for (var i = 0; i < this.snakes.length; i++) {
             if (isPositionInSnake(this.food.x, this.food.y, this.snakes[i].body)) {
+                empty = false;
+                break;
+            }
+        }
+        for (var i = 0; i < this.obstacles.length; i++) {
+            if (this.food.x === this.obstacles[i].x && this.food.y === this.obstacles[i].y) {
                 empty = false;
                 break;
             }
@@ -213,18 +231,211 @@ Game.prototype.generateFood = function() {
     } while (!empty);
 };
 
-// Start the game with a new generation
-Game.prototype.start = function() {
-    this.snakes = [];
-    this.gen = Neuvol.nextGeneration();
+// Create obstacles in the game
+Game.prototype.createObstacles = function() {
+    // Clear previous obstacles
+    this.obstacles = [];
     
-    for (var i in this.gen) {
-        this.snakes.push(new Snake());
+    // Create a central wall with a small gap
+    let centerX = Math.floor(this.gridWidth / 2);
+    let gapY = Math.floor(this.gridHeight / 2);
+    let gapSize = 3; // Size of the gap in the wall
+    
+    // Create vertical obstacle in the middle with a gap
+    for (let y = 0; y < this.gridHeight; y++) {
+        // Skip the gap area
+        if (y >= gapY - Math.floor(gapSize/2) && y <= gapY + Math.floor(gapSize/2)) {
+            continue;
+        }
+        this.obstacles.push({x: centerX, y: y});
     }
     
-    this.generation++;
-    this.alives = this.snakes.length;
+    // Add some random obstacles (3% of the grid)
+    const obstacleCount = Math.floor(this.gridWidth * this.gridHeight * 0.03);
+    for (let i = 0; i < obstacleCount; i++) {
+        let x, y;
+        let validPosition = false;
+        
+        // Try to find a position that's not already occupied
+        while (!validPosition) {
+            x = Math.floor(Math.random() * this.gridWidth);
+            y = Math.floor(Math.random() * this.gridHeight);
+            
+            // Check if position is already an obstacle
+            let isObstacle = false;
+            for (let j = 0; j < this.obstacles.length; j++) {
+                if (this.obstacles[j].x === x && this.obstacles[j].y === y) {
+                    isObstacle = true;
+                    break;
+                }
+            }
+            
+            // Don't place obstacles too close to the start position
+            const tooCloseToStart = (Math.abs(x - 5) < 3 && Math.abs(y - 5) < 3);
+            
+            // Position is valid if it's not already an obstacle and not too close to start
+            validPosition = !isObstacle && !tooCloseToStart;
+        }
+        
+        this.obstacles.push({x: x, y: y});
+    }
+};
+
+// Check if a position contains an obstacle
+Game.prototype.isObstacle = function(x, y) {
+    for (var i = 0; i < this.obstacles.length; i++) {
+        if (this.obstacles[i].x === x && this.obstacles[i].y === y) {
+            return true;
+        }
+    }
+    return false;
+};
+
+// Start the game with a new generation
+Game.prototype.start = function() {
+    this.iteration = 0;
+    
+    // Apply configuration 
+    if (window.CONFIG) {
+        this.gridWidth = CONFIG.game.width || 40;
+        this.gridHeight = CONFIG.game.height || 30;
+        this.tileSize = CONFIG.game.snakeSize || 15;
+        this.maxStepsWithoutFood = CONFIG.game.maxStepsWithoutFood || 100;
+    }
+    
+    // Initialize Neuroevolution algorithm
+    if (!Neuvol) {
+        let inputs = window.CONFIG ? CONFIG.network.inputSize : 9;
+        let hidden = window.CONFIG ? CONFIG.network.hiddenLayers : [16];
+        let outputs = window.CONFIG ? CONFIG.network.outputSize : 3;
+        let population = window.CONFIG ? CONFIG.evolution.populationSize : 100;
+        let elitism = window.CONFIG ? CONFIG.evolution.elitismRate : 0.15;
+        let randomBehaviour = window.CONFIG ? CONFIG.evolution.randomBehaviour : 0.2;
+        let mutationRate = window.CONFIG ? CONFIG.evolution.mutationRate : 0.3;
+        
+        Neuvol = new Neuroevolution({
+            population: population,
+            network: [inputs, ...hidden, outputs],
+            randomBehaviour: randomBehaviour,
+            mutationRate: mutationRate,
+            mutationRange: 0.5,
+            elitism: elitism
+        });
+    }
+    
+    // Create obstacles if enabled
+    this.obstacles = [];
+    if (window.CONFIG && CONFIG.game.obstacles) {
+        this.createObstacles();
+    }
+    
+    // Reset game state
+    this.generation = Neuvol.generation;
+    this.alives = 0;
+    this.score = 0;
+    this.maxScore = 0;
+    
+    // Generate neural networks for snakes
+    this.gen = Neuvol.nextGeneration();
+    
+    // Create snake objects
+    this.snakes = [];
+    for (let i = 0; i < Neuvol.options.population; i++) {
+        let snake = new Snake();
+        snake.brain = this.gen[i];
+        snake.maxStepsWithoutFood = this.maxStepsWithoutFood;
+        this.snakes.push(snake);
+        this.alives++;
+    }
+    
+    // Generate initial food
     this.generateFood();
+    
+    // Start game loop
+    this.update();
+};
+
+// Add step function for manual stepping when paused
+Game.prototype.step = function() {
+    if (this.alives > 0) {
+        // Update one frame
+        this.iteration++;
+        
+        // Update each snake
+        for (let i = 0; i < this.snakes.length; i++) {
+            if (this.snakes[i].alive) {
+                const inputs = this.getNetworkInputs(this.snakes[i]);
+                const outputs = this.gen[i].compute(inputs);
+                
+                // Determine action based on neural network output
+                if (outputs[0] > outputs[1] && outputs[0] > outputs[2]) {
+                    this.snakes[i].turnLeft();
+                } else if (outputs[2] > outputs[0] && outputs[2] > outputs[1]) {
+                    this.snakes[i].turnRight();
+                } else {
+                    this.snakes[i].goStraight();
+                }
+                
+                // Update snake position
+                this.snakes[i].update(this);
+                
+                // Update score
+                if (this.snakes[i].score > this.score) {
+                    this.score = this.snakes[i].score;
+                }
+                
+                // Update max score
+                if (this.score > this.maxScore) {
+                    this.maxScore = this.score;
+                }
+                
+                // Check if snake is still alive
+                if (!this.snakes[i].alive) {
+                    this.alives--;
+                }
+            }
+        }
+        
+        // Update the display
+        this.display();
+    } else {
+        // All snakes are dead, start new generation
+        this.start();
+    }
+};
+
+// Modify the update method to respect pause state
+Game.prototype.update = function() {
+    if (window.gamePaused) {
+        // If game is paused, just request next frame without updating
+        if (FPS == 0) {
+            setZeroTimeout(() => this.update());
+        } else {
+            setTimeout(() => this.update(), 1000/FPS);
+        }
+        return;
+    }
+    
+    this.step();
+    
+    // Schedule next update
+    if (FPS == 0) {
+        setZeroTimeout(() => this.update());
+    } else {
+        setTimeout(() => this.update(), 1000/FPS);
+    }
+    
+    // Update stats if the stats module is available
+    if (window.gameStats) {
+        window.gameStats.update({
+            generation: this.generation,
+            maxScore: this.maxScore,
+            avgScore: this.getAverageScore(),
+            alive: this.alives,
+            population: this.snakes.length,
+            newGeneration: this.alives === 0 || this.iteration === 1
+        });
+    }
 };
 
 // Check if the game is over (all snakes dead)
@@ -235,95 +446,6 @@ Game.prototype.isItEnd = function() {
         }
     }
     return true;
-};
-
-// Normalize a value between min and max to range [0,1]
-function normalize(value, min, max) {
-    return (value - min) / (max - min);
-}
-
-// Update game state
-Game.prototype.update = function() {
-    // Skip if no snakes
-    if (this.snakes.length === 0) return;
-    
-    // Update each snake
-    for (var i in this.snakes) {
-        if (this.snakes[i].alive) {
-            // Prepare inputs for neural network:
-            // 1. Direction of food relative to snake head (normalized)
-            // 2. Dangers in different directions
-            var inputs = this.getNetworkInputs(this.snakes[i]);
-            
-            // Get neural network's decision: [goLeft, goStraight, goRight]
-            var res = this.gen[i].compute(inputs);
-            
-            // Determine action based on the highest output value
-            var maxIndex = 0;
-            for (var j = 1; j < res.length; j++) {
-                if (res[j] > res[maxIndex]) {
-                    maxIndex = j;
-                }
-            }
-            
-            // Apply the action
-            switch (maxIndex) {
-                case 0: // Turn left
-                    this.snakes[i].turnLeft();
-                    break;
-                case 1: // Go straight
-                    this.snakes[i].goStraight();
-                    break;
-                case 2: // Turn right
-                    this.snakes[i].turnRight();
-                    break;
-            }
-            
-            // Update snake position
-            this.snakes[i].update(this);
-            
-            // Check if snake died after update
-            if (!this.snakes[i].alive) {
-                this.alives--;
-                // Calculate final fitness: score (length) + small bonus for steps alive
-                var fitness = this.snakes[i].score + (this.snakes[i].stepsAlive * 0.01);
-                
-                // Send the score to Neuroevolution
-                Neuvol.networkScore(this.gen[i], fitness);
-                
-                // If all snakes are dead, start next generation
-                if (this.isItEnd()) {
-                    this.start();
-                }
-            }
-            
-            // Update max score
-            if (this.snakes[i].score > this.maxScore) {
-                this.maxScore = this.snakes[i].score;
-                
-                // Update UI
-                document.getElementById('maxScore').textContent = this.maxScore;
-            }
-        }
-    }
-    
-    // Update UI
-    document.getElementById('currentScore').textContent = this.getBestCurrentScore();
-    document.getElementById('generation').textContent = this.generation;
-    document.getElementById('alive').textContent = this.alives;
-    document.getElementById('population').textContent = Neuvol.options.population;
-    
-    // Schedule next update based on FPS
-    var self = this;
-    if (FPS === 0) {
-        setZeroTimeout(function() {
-            self.update();
-        });
-    } else {
-        setTimeout(function() {
-            self.update();
-        }, 1000 / FPS);
-    }
 };
 
 // Get the best score of the current generation's alive snakes
@@ -353,7 +475,7 @@ Game.prototype.getNetworkInputs = function(snake) {
     // Get positions of squares in the left, front, and right directions relative to snake's current direction
     var checkPositions = this.getRelativeCheckPositions(snake);
     
-    // For each position, check if there's a collision (wall or snake body)
+    // For each position, check if there's a collision (wall, snake body, or obstacle)
     var dangerLeft = this.checkCollision(checkPositions.left.x, checkPositions.left.y, snake) ? 1 : 0;
     var dangerFront = this.checkCollision(checkPositions.front.x, checkPositions.front.y, snake) ? 1 : 0;
     var dangerRight = this.checkCollision(checkPositions.right.x, checkPositions.right.y, snake) ? 1 : 0;
@@ -384,6 +506,13 @@ Game.prototype.checkCollision = function(x, y, snake) {
     // Check body collision (excluding the tail which will move)
     for (var i = 0; i < snake.body.length - 1; i++) {
         if (x === snake.body[i].x && y === snake.body[i].y) {
+            return true;
+        }
+    }
+    
+    // Check obstacle collision
+    for (var i = 0; i < this.obstacles.length; i++) {
+        if (x === this.obstacles[i].x && y === this.obstacles[i].y) {
             return true;
         }
     }
@@ -434,28 +563,56 @@ Game.prototype.display = function() {
     // Clear the canvas
     this.ctx.clearRect(0, 0, this.width, this.height);
     
-    // Draw the grid (optional)
-    this.ctx.strokeStyle = '#333';
-    this.ctx.lineWidth = 0.5;
+    // Get config for UI elements
+    const showGrid = window.CONFIG ? CONFIG.ui.showGrid : true;
+    const showVision = window.CONFIG ? CONFIG.ui.showVision : true;
+    const showAllSnakes = window.CONFIG ? !CONFIG.ui.showBestOnly : true;
+    const showTopN = window.CONFIG ? CONFIG.ui.showTopN : 5;
+    const gridColor = window.CONFIG ? CONFIG.ui.gridColor : 'rgba(50, 50, 50, 0.2)';
+    const foodColor = window.CONFIG ? CONFIG.ui.foodColor : '#e74c3c';
+    const obstacleColor = window.CONFIG ? CONFIG.ui.obstacleColor : '#34495e';
+    const bestSnakeColor = window.CONFIG ? CONFIG.ui.bestSnakeColor : '#ff0000';
+    const normalSnakeColor = window.CONFIG ? CONFIG.ui.normalSnakeColor : '#2ecc71';
+    const ghostSnakeColor = window.CONFIG ? CONFIG.ui.ghostSnakeColor : 'rgba(200, 200, 200, 0.2)';
     
-    // Draw vertical grid lines
-    for (var x = 0; x <= this.width; x += this.tileSize) {
-        this.ctx.beginPath();
-        this.ctx.moveTo(x, 0);
-        this.ctx.lineTo(x, this.height);
-        this.ctx.stroke();
+    // Find the best performing snake (highest score)
+    let bestSnakeIdx = 0;
+    let bestScore = -1;
+    for (let i = 0; i < this.snakes.length; i++) {
+        if (this.snakes[i].alive && this.snakes[i].score > bestScore) {
+            bestScore = this.snakes[i].score;
+            bestSnakeIdx = i;
+        }
     }
     
-    // Draw horizontal grid lines
-    for (var y = 0; y <= this.height; y += this.tileSize) {
-        this.ctx.beginPath();
-        this.ctx.moveTo(0, y);
-        this.ctx.lineTo(this.width, y);
-        this.ctx.stroke();
+    // Background
+    this.ctx.fillStyle = window.CONFIG ? CONFIG.ui.backgroundColor : '#141e30';
+    this.ctx.fillRect(0, 0, this.width, this.height);
+    
+    // Draw the grid if enabled
+    if (showGrid) {
+        this.ctx.strokeStyle = gridColor;
+        this.ctx.lineWidth = 0.5;
+        
+        // Draw vertical grid lines
+        for (let x = 0; x <= this.width; x += this.tileSize) {
+            this.ctx.beginPath();
+            this.ctx.moveTo(x, 0);
+            this.ctx.lineTo(x, this.height);
+            this.ctx.stroke();
+        }
+        
+        // Draw horizontal grid lines
+        for (let y = 0; y <= this.height; y += this.tileSize) {
+            this.ctx.beginPath();
+            this.ctx.moveTo(0, y);
+            this.ctx.lineTo(this.width, y);
+            this.ctx.stroke();
+        }
     }
     
     // Draw food
-    this.ctx.fillStyle = '#e74c3c';
+    this.ctx.fillStyle = foodColor;
     this.ctx.fillRect(
         this.food.x * this.tileSize,
         this.food.y * this.tileSize,
@@ -463,45 +620,175 @@ Game.prototype.display = function() {
         this.tileSize
     );
     
-    // Draw all snakes
-    for (var i in this.snakes) {
+    // Add some glow effect to the food
+    this.ctx.shadowColor = foodColor;
+    this.ctx.shadowBlur = 10;
+    this.ctx.beginPath();
+    this.ctx.arc(
+        (this.food.x + 0.5) * this.tileSize,
+        (this.food.y + 0.5) * this.tileSize,
+        this.tileSize / 2,
+        0,
+        Math.PI * 2
+    );
+    this.ctx.fill();
+    this.ctx.shadowBlur = 0;
+    
+    // Draw obstacles
+    this.ctx.fillStyle = obstacleColor;
+    for (let i = 0; i < this.obstacles.length; i++) {
+        this.ctx.fillRect(
+            this.obstacles[i].x * this.tileSize,
+            this.obstacles[i].y * this.tileSize,
+            this.tileSize,
+            this.tileSize
+        );
+    }
+    
+    // Draw all snakes with different visibility based on performance
+    for (let i = 0; i < this.snakes.length; i++) {
         if (this.snakes[i].alive) {
-            // Choose colors based on whether it's the best snake
-            var isTopSnake = this.isBestSnake(this.snakes[i]);
-            var headColor = isTopSnake ? '#3498db' : '#2ecc71';
-            var bodyColor = isTopSnake ? '#2980b9' : '#27ae60';
+            // Determine snake rendering style
+            let isBestSnake = (i === bestSnakeIdx);
+            let isTopPerformer = false;
             
-            // Draw snake body
-            for (var j = 0; j < this.snakes[i].body.length; j++) {
-                var segment = this.snakes[i].body[j];
+            // Sort snakes by score to determine top performers
+            if (!isBestSnake && showAllSnakes) {
+                let snakeRank = 1;
+                for (let j = 0; j < this.snakes.length; j++) {
+                    if (j !== i && this.snakes[j].alive && this.snakes[j].score > this.snakes[i].score) {
+                        snakeRank++;
+                    }
+                }
+                isTopPerformer = (snakeRank <= showTopN);
+            }
+            
+            // Only draw visible snakes (best, top performers, or all if configured)
+            if (isBestSnake || isTopPerformer || showAllSnakes) {
+                // Set color based on snake status
+                let headColor, bodyColor;
+                let opacity = 1.0;
                 
-                // Head has different color than body
-                this.ctx.fillStyle = j === 0 ? headColor : bodyColor;
+                if (isBestSnake) {
+                    // Best snake: bright red for head, orange-red gradient for body
+                    headColor = bestSnakeColor;
+                    bodyColor = '#ff6347'; // Tomato color for body
+                } else if (isTopPerformer) {
+                    // Top performers: normal color
+                    headColor = normalSnakeColor;
+                    bodyColor = '#27ae60'; // Darker green for body
+                } else {
+                    // Background snakes: transparent/ghosted
+                    headColor = ghostSnakeColor;
+                    bodyColor = ghostSnakeColor;
+                    opacity = 0.2;
+                }
                 
-                // Draw segment
-                this.ctx.fillRect(
-                    segment.x * this.tileSize,
-                    segment.y * this.tileSize,
-                    this.tileSize,
-                    this.tileSize
-                );
+                // Draw the snake body (segments)
+                this.ctx.globalAlpha = opacity;
+                for (let j = this.snakes[i].body.length - 1; j >= 0; j--) {
+                    // For the best snake, create a gradient effect from body to head
+                    if (isBestSnake) {
+                        const gradientPos = j / this.snakes[i].body.length;
+                        const r = Math.floor(255 - gradientPos * 50);
+                        const g = Math.floor(99 - gradientPos * 80);
+                        const b = Math.floor(71 - gradientPos * 50);
+                        bodyColor = `rgb(${r}, ${g}, ${b})`;
+                    }
+                    
+                    // Draw each segment
+                    this.ctx.fillStyle = j === 0 ? headColor : bodyColor;
+                    this.ctx.fillRect(
+                        this.snakes[i].body[j].x * this.tileSize,
+                        this.snakes[i].body[j].y * this.tileSize,
+                        this.tileSize,
+                        this.tileSize
+                    );
+                    
+                    // Add details for head segment
+                    if (j === 0) {
+                        // Draw eyes
+                        this.ctx.fillStyle = 'white';
+                        
+                        // Eye positions based on direction
+                        const eyeSize = this.tileSize / 5;
+                        const eyeOffset = this.tileSize / 3;
+                        
+                        let leftEyeX, leftEyeY, rightEyeX, rightEyeY;
+                        
+                        switch (this.snakes[i].direction) {
+                            case DIRECTION.UP:
+                                leftEyeX = this.snakes[i].body[j].x * this.tileSize + eyeOffset;
+                                leftEyeY = this.snakes[i].body[j].y * this.tileSize + eyeOffset;
+                                rightEyeX = this.snakes[i].body[j].x * this.tileSize + this.tileSize - eyeOffset - eyeSize;
+                                rightEyeY = this.snakes[i].body[j].y * this.tileSize + eyeOffset;
+                                break;
+                            case DIRECTION.RIGHT:
+                                leftEyeX = this.snakes[i].body[j].x * this.tileSize + this.tileSize - eyeOffset - eyeSize;
+                                leftEyeY = this.snakes[i].body[j].y * this.tileSize + eyeOffset;
+                                rightEyeX = this.snakes[i].body[j].x * this.tileSize + this.tileSize - eyeOffset - eyeSize;
+                                rightEyeY = this.snakes[i].body[j].y * this.tileSize + this.tileSize - eyeOffset - eyeSize;
+                                break;
+                            case DIRECTION.DOWN:
+                                leftEyeX = this.snakes[i].body[j].x * this.tileSize + this.tileSize - eyeOffset - eyeSize;
+                                leftEyeY = this.snakes[i].body[j].y * this.tileSize + this.tileSize - eyeOffset - eyeSize;
+                                rightEyeX = this.snakes[i].body[j].x * this.tileSize + eyeOffset;
+                                rightEyeY = this.snakes[i].body[j].y * this.tileSize + this.tileSize - eyeOffset - eyeSize;
+                                break;
+                            case DIRECTION.LEFT:
+                                leftEyeX = this.snakes[i].body[j].x * this.tileSize + eyeOffset;
+                                leftEyeY = this.snakes[i].body[j].y * this.tileSize + this.tileSize - eyeOffset - eyeSize;
+                                rightEyeX = this.snakes[i].body[j].x * this.tileSize + eyeOffset;
+                                rightEyeY = this.snakes[i].body[j].y * this.tileSize + eyeOffset;
+                                break;
+                        }
+                        
+                        // Only draw eyes for best and top performers (not ghost snakes)
+                        if (isBestSnake || isTopPerformer) {
+                            this.ctx.fillRect(leftEyeX, leftEyeY, eyeSize, eyeSize);
+                            this.ctx.fillRect(rightEyeX, rightEyeY, eyeSize, eyeSize);
+                        }
+                    }
+                }
                 
-                // Draw a border around each segment
-                this.ctx.strokeStyle = '#333';
-                this.ctx.lineWidth = 1;
-                this.ctx.strokeRect(
-                    segment.x * this.tileSize,
-                    segment.y * this.tileSize,
-                    this.tileSize,
-                    this.tileSize
-                );
+                // Reset opacity
+                this.ctx.globalAlpha = 1.0;
+                
+                // For best snake, show vision lines and neural network inputs if enabled
+                if (isBestSnake && showVision) {
+                    this.drawVisionForSnake(this.snakes[i]);
+                    
+                    // Add label above best snake
+                    this.ctx.font = 'bold 12px Arial';
+                    this.ctx.fillStyle = 'white';
+                    this.ctx.textAlign = 'center';
+                    
+                    // Get direction as string
+                    let directionText = '';
+                    switch (this.snakes[i].direction) {
+                        case DIRECTION.UP: directionText = '↑'; break;
+                        case DIRECTION.RIGHT: directionText = '→'; break;
+                        case DIRECTION.DOWN: directionText = '↓'; break;
+                        case DIRECTION.LEFT: directionText = '←'; break;
+                    }
+                    
+                    // Draw text with shadow for better visibility
+                    this.ctx.shadowColor = 'black';
+                    this.ctx.shadowBlur = 4;
+                    this.ctx.fillText(
+                        `BEST SNAKE: ${directionText}`,
+                        (this.snakes[i].body[0].x + 0.5) * this.tileSize,
+                        this.snakes[i].body[0].y * this.tileSize - 5
+                    );
+                    this.ctx.shadowBlur = 0;
+                }
             }
         }
     }
     
     // Continue rendering
-    requestAnimationFrame(function() {
-        self.display();
+    requestAnimationFrame(() => {
+        this.display();
     });
 };
 
@@ -518,27 +805,157 @@ Game.prototype.isBestSnake = function(snake) {
     return true;
 };
 
+// Check if a position is dangerous (wall or snake collision)
+Game.prototype.isDanger = function(x, y) {
+    // Check wall collision
+    if (x < 0 || x >= this.gridWidth || y < 0 || y >= this.gridHeight) {
+        return true;
+    }
+    
+    // Check snake collision
+    for (var i = 0; i < this.snakes.length; i++) {
+        if (isPositionInSnake(x, y, this.snakes[i].body)) {
+            return true;
+        }
+    }
+    
+    // Check obstacle collision
+    for (var i = 0; i < this.obstacles.length; i++) {
+        if (x === this.obstacles[i].x && y === this.obstacles[i].y) {
+            return true;
+        }
+    }
+    
+    return false;
+};
+
+// Visualize the snake's vision (neural network inputs)
+Game.prototype.drawVisionForSnake = function(snake) {
+    // Get the head position
+    const head = snake.body[0];
+    const headX = (head.x + 0.5) * this.tileSize;
+    const headY = (head.y + 0.5) * this.tileSize;
+    
+    // Get the food position
+    const foodX = (this.food.x + 0.5) * this.tileSize;
+    const foodY = (this.food.y + 0.5) * this.tileSize;
+    
+    // Draw a line to the food
+    this.ctx.strokeStyle = 'rgba(231, 76, 60, 0.6)'; // Transparent red
+    this.ctx.lineWidth = 2;
+    this.ctx.setLineDash([5, 3]); // Create a dashed line
+    this.ctx.beginPath();
+    this.ctx.moveTo(headX, headY);
+    this.ctx.lineTo(foodX, foodY);
+    this.ctx.stroke();
+    this.ctx.setLineDash([]); // Reset to solid line
+    
+    // Draw vision rays in different directions
+    const visionRayLength = 5 * this.tileSize; // Length of vision rays
+    const directions = [
+        { name: "left", angle: -Math.PI/4 },
+        { name: "forward", angle: 0 },
+        { name: "right", angle: Math.PI/4 }
+    ];
+    
+    // Get the base angle based on snake direction
+    let baseAngle;
+    switch (snake.direction) {
+        case DIRECTION.UP: baseAngle = -Math.PI/2; break;
+        case DIRECTION.RIGHT: baseAngle = 0; break;
+        case DIRECTION.DOWN: baseAngle = Math.PI/2; break;
+        case DIRECTION.LEFT: baseAngle = Math.PI; break;
+    }
+    
+    // Get the check positions
+    const checkPositions = this.getRelativeCheckPositions(snake);
+    const positions = [
+        { name: "left", pos: checkPositions.left, dangerous: this.checkCollision(checkPositions.left.x, checkPositions.left.y, snake) },
+        { name: "front", pos: checkPositions.front, dangerous: this.checkCollision(checkPositions.front.x, checkPositions.front.y, snake) },
+        { name: "right", pos: checkPositions.right, dangerous: this.checkCollision(checkPositions.right.x, checkPositions.right.y, snake) }
+    ];
+    
+    // Draw danger zones
+    positions.forEach(position => {
+        const centerX = (position.pos.x + 0.5) * this.tileSize;
+        const centerY = (position.pos.y + 0.5) * this.tileSize;
+        
+        // Draw a circle at the position
+        this.ctx.fillStyle = position.dangerous ? 'rgba(231, 76, 60, 0.5)' : 'rgba(46, 204, 113, 0.3)';
+        this.ctx.beginPath();
+        this.ctx.arc(centerX, centerY, this.tileSize * 0.4, 0, Math.PI * 2);
+        this.ctx.fill();
+        
+        // Draw a ray to the position
+        this.ctx.strokeStyle = position.dangerous ? 'rgba(231, 76, 60, 0.8)' : 'rgba(46, 204, 113, 0.6)';
+        this.ctx.lineWidth = 1.5;
+        this.ctx.beginPath();
+        this.ctx.moveTo(headX, headY);
+        this.ctx.lineTo(centerX, centerY);
+        this.ctx.stroke();
+    });
+    
+    // For completeness, let's also draw extended vision rays beyond the immediate cells
+    for (let i = 0; i < directions.length; i++) {
+        const angle = baseAngle + directions[i].angle;
+        const endX = headX + Math.cos(angle) * visionRayLength;
+        const endY = headY + Math.sin(angle) * visionRayLength;
+        
+        // Draw extended vision ray
+        this.ctx.strokeStyle = 'rgba(189, 195, 199, 0.2)'; // Very light gray
+        this.ctx.lineWidth = 1;
+        this.ctx.setLineDash([2, 2]); // Dotted line
+        this.ctx.beginPath();
+        this.ctx.moveTo(headX, headY);
+        this.ctx.lineTo(endX, endY);
+        this.ctx.stroke();
+        this.ctx.setLineDash([]); // Reset to solid line
+    }
+};
+
+// Add method to calculate average score for stats display
+Game.prototype.getAverageScore = function() {
+    let total = 0;
+    let count = 0;
+    
+    for (let i = 0; i < this.snakes.length; i++) {
+        if (this.snakes[i].alive) {
+            total += this.snakes[i].score;
+            count++;
+        }
+    }
+    
+    return count > 0 ? total / count : 0;
+};
+
 // Initialize the game when the window loads
 window.onload = function() {
-    // Initialize Neuroevolution with 9 inputs:
-    // - Food direction X (-1 to 1)
-    // - Food direction Y (-1 to 1)
-    // - Danger left (0 or 1)
-    // - Danger front (0 or 1)
-    // - Danger right (0 or 1)
-    // - Current direction one-hot encoded (4 values)
+    // Initialize the stats panel
+    if (window.gameStats) {
+        window.gameStats.initialize();
+    }
+    
+    // Initialize Neuroevolution with configuration params
+    let inputs = window.CONFIG ? CONFIG.network.inputs : 9;
+    let hidden = window.CONFIG ? CONFIG.network.hiddenLayers : [16];
+    let outputs = window.CONFIG ? CONFIG.network.outputs : 3;
+    let population = window.CONFIG ? CONFIG.evolution.population : 100;
+    let elitism = window.CONFIG ? CONFIG.evolution.elitism : 0.15;
+    let randomBehaviour = window.CONFIG ? CONFIG.evolution.randomBehaviour : 0.2;
+    let mutationRate = window.CONFIG ? CONFIG.evolution.mutationRate : 0.3;
+    
+    // Create Neuroevolution instance
     Neuvol = new Neuroevolution({
-        population: 50,
-        network: [9, [12], 3], // 9 inputs, 1 hidden layer with 12 neurons, 3 outputs (left, straight, right)
-        mutationRate: 0.2,
+        population: population,
+        network: [inputs, ...hidden, outputs],
+        mutationRate: mutationRate,
         mutationRange: 0.5,
-        elitism: 0.1,
-        randomBehaviour: 0.2
+        elitism: elitism,
+        randomBehaviour: randomBehaviour
     });
     
     // Create and start the game
     game = new Game();
     game.start();
     game.update();
-    game.display();
 };
