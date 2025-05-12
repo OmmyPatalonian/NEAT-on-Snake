@@ -22,7 +22,7 @@ Neuroevolution combines neural networks with genetic algorithms to evolve increa
      - Food direction X & Y relative to the snake's head
      - Danger detection in three directions (left, front, right)
      - Current direction (one-hot encoded)
-   - **Hidden Layer** (12 neurons)
+   - **Hidden Layer** (16 neurons)
    - **Outputs** (3 neurons):
      - Turn left
      - Go straight

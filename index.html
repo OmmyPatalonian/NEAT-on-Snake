@@ -4,14 +4,26 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>NeuroEvolution : Snake</title>
-    <link href='https://fonts.googleapis.com/css?family=Oswald' rel='stylesheet' type='text/css'>
-    <style>
+    <link href='https://fonts.googleapis.com/css?family=Oswald' rel='stylesheet' type='text/css'>    <style>
         body {
             font-family: 'Oswald', sans-serif;
             text-align: center;
             background-color: #f0f0f0;
             margin: 0;
             padding: 20px;
+            color: #333;
+        }
+        
+        h1 {
+            margin-bottom: 5px;
+            color: #2c3e50;
+        }
+        
+        h2 {
+            margin-top: 0;
+            color: #7f8c8d;
+            font-size: 1.2em;
+            margin-bottom: 20px;
         }
         
         .game-container {
@@ -19,20 +31,38 @@
             background-color: white;
             padding: 20px;
             border-radius: 8px;
-            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            max-width: 100%;
         }
         
         canvas {
             border: 2px solid #333;
-            background-color: #000;
+            background: linear-gradient(135deg, #141e30, #243b55);
+            border-radius: 4px;
         }
         
         .controls {
             margin: 15px 0;
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+        }
+        
+        .control-group {
+            display: flex;
+            gap: 5px;
+            margin: 0 10px;
+            align-items: center;
+        }
+        
+        .control-group-label {
+            font-size: 14px;
+            color: #666;
+            margin-right: 5px;
         }
         
         button {
-            background-color: #4CAF50;
+            background-color: #3498db;
             border: none;
             color: white;
             padding: 8px 16px;
@@ -47,39 +77,262 @@
         }
         
         button:hover {
-            background-color: #45a049;
+            background-color: #2980b9;
+        }
+        
+        button.active {
+            background-color: #2ecc71;
+        }
+        
+        .speed-btn {
+            background-color: #95a5a6;
+            padding: 6px 12px;
+            font-size: 14px;
+        }
+        
+        .speed-btn:hover {
+            background-color: #7f8c8d;
+        }
+        
+        .speed-btn.active {
+            background-color: #e74c3c;
+        }
+        
+        .play-btn {
+            background-color: #2ecc71;
+            padding: 8px 20px;
+        }
+        
+        .play-btn:hover {
+            background-color: #27ae60;
+        }
+        
+        .play-btn.pause {
+            background-color: #e74c3c;
+        }
+        
+        .play-btn.pause:hover {
+            background-color: #c0392b;
         }
         
         .stats {
             margin-top: 15px;
             text-align: left;
-            display: inline-block;
+            display: flex;
             padding: 10px;
             background-color: #f9f9f9;
             border-radius: 4px;
             border: 1px solid #ddd;
+            justify-content: space-around;
+        }
+        
+        .stat-group {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        
+        .stat-label {
+            font-size: 12px;
+            color: #7f8c8d;
+        }
+        
+        .stat-value {
+            font-size: 18px;
+            font-weight: bold;
+            color: #2c3e50;
+        }
+        
+        /* Tooltip styles */
+        .tooltip {
+            position: relative;
+            display: inline-block;
+            cursor: help;
+        }
+        
+        .tooltip .tooltiptext {
+            visibility: hidden;
+            width: 200px;
+            background-color: #333;
+            color: #fff;
+            text-align: center;
+            border-radius: 6px;
+            padding: 5px;
+            position: absolute;
+            z-index: 1;
+            bottom: 125%;
+            left: 50%;
+            margin-left: -100px;
+            opacity: 0;
+            transition: opacity 0.3s;
+            font-size: 12px;
+            line-height: 1.4;
+        }
+        
+        .tooltip:hover .tooltiptext {
+            visibility: visible;
+            opacity: 1;
         }
     </style>
 </head>
-<body>
-    <h1>Snake Game with NeuroEvolution</h1>
-    <div class="game-container">
-        <canvas id="snakeCanvas" width="400" height="400"></canvas>
-        <div class="controls">
-            <button onclick="speed(60)">x1</button>
-            <button onclick="speed(120)">x2</button>
-            <button onclick="speed(300)">x5</button>
-            <button onclick="speed(0)">MAX</button>
-        </div>
-        <div class="stats">
-            <p>Score: <span id="currentScore">0</span></p>
-            <p>Max Score: <span id="maxScore">0</span></p>
-            <p>Generation: <span id="generation">0</span></p>
-            <p>Alive: <span id="alive">0</span>/<span id="population">0</span></p>
+<body>    <h1>Advanced Snake Game with NeuroEvolution</h1>
+    <h2>Visualizing NEAT Algorithm in Action</h2>    <div class="game-container">
+        <canvas id="snakeCanvas" width="800" height="600"></canvas>        <div class="controls">
+            <div class="control-group">
+                <button id="play-pause-btn" class="play-btn">⏸ Pause</button>
+                <button id="step-btn">⏯ Step</button>
+            </div>
+            
+            <div class="control-group">
+                <span class="control-group-label">Speed:</span>
+                <button class="speed-btn" onclick="setSpeed(15)">x0.25</button>
+                <button class="speed-btn" onclick="setSpeed(30)">x0.5</button>
+                <button class="speed-btn active" onclick="setSpeed(60)">x1</button>
+                <button class="speed-btn" onclick="setSpeed(120)">x2</button>
+                <button class="speed-btn" onclick="setSpeed(300)">x5</button>
+                <button class="speed-btn" onclick="setSpeed(0)">MAX</button>
+            </div>
+            
+            <div class="control-group">
+                <span class="control-group-label">Display:</span>
+                <button id="toggle-grid-btn">Grid</button>
+                <button id="toggle-vision-btn">Vision</button>
+                <button id="toggle-network-btn">Network</button>
+            </div>
+        </div>        <div class="stats">
+            <div class="stat-group">
+                <span class="stat-label">Current Score</span>
+                <span id="currentScore" class="stat-value">0</span>
+            </div>
+            <div class="stat-group">
+                <span class="stat-label">Best Score</span>
+                <span id="maxScore" class="stat-value">0</span>
+            </div>
+            <div class="stat-group">
+                <span class="stat-label">Generation</span>
+                <span id="generation" class="stat-value">0</span>
+            </div>
+            <div class="stat-group">
+                <span class="stat-label">Alive</span>
+                <span class="stat-value"><span id="alive">0</span>/<span id="population">0</span></span>
+            </div>
+            <div class="stat-group tooltip">
+                <span class="stat-label">Network</span>
+                <span class="stat-value">9-16-3</span>
+                <span class="tooltiptext">
+                    9 inputs: food direction, danger detection, current direction<br>
+                    16 hidden neurons<br>
+                    3 outputs: turn left, go straight, turn right
+                </span>
+            </div>
+            <div class="stat-group tooltip">
+                <span class="stat-label">Mutation Rate</span>
+                <span class="stat-value">30%</span>
+                <span class="tooltiptext">
+                    Probability of mutating weights in the neural network during reproduction.
+                    Higher values mean more exploration of new solutions.
+                </span>
+            </div>
         </div>
     </div>
-    
+      <script src="config.js"></script>
+    <script src="utils.js"></script>
     <script src="Neuroevolution.js"></script>
     <script src="game.js"></script>
+    <script src="stats.js"></script>
+      <script>
+        // Initialize UI controls
+        document.addEventListener('DOMContentLoaded', function() {
+            // Speed button control
+            const speedButtons = document.querySelectorAll('.speed-btn');
+            speedButtons.forEach(btn => {
+                btn.addEventListener('click', function() {
+                    speedButtons.forEach(b => b.classList.remove('active'));
+                    this.classList.add('active');
+                });
+            });
+            
+            // Play/Pause button
+            const playPauseBtn = document.getElementById('play-pause-btn');
+            playPauseBtn.addEventListener('click', function() {
+                if (window.gamePaused) {
+                    window.resumeGame();
+                    this.innerHTML = '⏸ Pause';
+                    this.classList.remove('pause');
+                } else {
+                    window.pauseGame();
+                    this.innerHTML = '▶ Resume';
+                    this.classList.add('pause');
+                }
+            });
+            
+            // Step button
+            const stepBtn = document.getElementById('step-btn');
+            stepBtn.addEventListener('click', function() {
+                if (window.gamePaused) {
+                    window.stepGame();
+                }
+            });
+            
+            // Toggle grid button
+            const toggleGridBtn = document.getElementById('toggle-grid-btn');
+            toggleGridBtn.addEventListener('click', function() {
+                if (window.CONFIG) {
+                    window.CONFIG.ui.showGrid = !window.CONFIG.ui.showGrid;
+                    this.classList.toggle('active');
+                }
+            });
+            toggleGridBtn.classList.add('active'); // Grid is on by default
+            
+            // Toggle vision button
+            const toggleVisionBtn = document.getElementById('toggle-vision-btn');
+            toggleVisionBtn.addEventListener('click', function() {
+                if (window.CONFIG) {
+                    window.CONFIG.ui.showVision = !window.CONFIG.ui.showVision;
+                    this.classList.toggle('active');
+                }
+            });
+            toggleVisionBtn.classList.add('active'); // Vision is on by default
+            
+            // Toggle network button
+            const toggleNetworkBtn = document.getElementById('toggle-network-btn');
+            toggleNetworkBtn.addEventListener('click', function() {
+                if (window.CONFIG) {
+                    window.CONFIG.ui.showNetwork = !window.CONFIG.ui.showNetwork;
+                    this.classList.toggle('active');
+                    
+                    // Show/hide network visualization
+                    const networkViz = document.getElementById('network-visualization');
+                    if (networkViz) {
+                        networkViz.style.display = window.CONFIG.ui.showNetwork ? 'block' : 'none';
+                    }
+                }
+            });
+        });
+        
+        // Global control functions
+        window.gamePaused = false;
+        
+        window.pauseGame = function() {
+            window.gamePaused = true;
+        };
+        
+        window.resumeGame = function() {
+            window.gamePaused = false;
+            if (window.game) {
+                window.game.update();
+            }
+        };
+        
+        window.stepGame = function() {
+            if (window.game && window.gamePaused) {
+                window.game.step();
+            }
+        };
+        
+        window.setSpeed = function(fps) {
+            window.speed(fps);
+        };
+    </script>
 </body>
 </html>
